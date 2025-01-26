@@ -51,7 +51,7 @@ export default class ScheduleService implements IScheduleService {
         this.thisMonthSchedules = []
         this.bestPopulation = ''
         this.bestFitness = 0
-        this.populationCount = 50
+        this.populationCount = 2
     }
 
     private prodeaconsValidation = (schedule: ISchedule): { message: string, flag: boolean } => {
@@ -88,30 +88,78 @@ export default class ScheduleService implements IScheduleService {
         return { message, flag }
     }
 
+    private printCurrentPopulation = (population) => {
+        let count = 0
+        let pop
+        for (let i = 0; i < this.weekendSchedule.length; i++) {
+            let currentSchedule = this.weekendSchedule[i].date
+            let printOut = ''
+            printOut += String(currentSchedule.getDate()).padStart(2, '0') + '/' + String(currentSchedule.getMonth() + 1).padStart(2, '0')  + ' - ' + this.weekendSchedule[i].time + ' '
+            for (let j = 0; j < this.weekendSchedule[i].quota; j++) {
+                let currentBit = population.substring(
+                    (count * this.individualBit),
+                    ((count + 1) * this.individualBit)
+                );
+                printOut += currentBit + ' '
+                count++
+            }
+            console.log(printOut)
+        }
+        console.log('')
+
+        count = 0
+        for (let i = 0; i < this.weekendSchedule.length; i++) {
+            let currentSchedule = this.weekendSchedule[i].date
+            let printOut = ''
+            printOut += String(currentSchedule.getDate()).padStart(2, '0') + '/' + String(currentSchedule.getMonth() + 1).padStart(2, '0')  + ' - ' + this.weekendSchedule[i].time + ' '
+            for (let j = 0; j < this.weekendSchedule[i].quota; j++) {
+                let currentBit = population.substring(
+                    (count * this.individualBit),
+                    ((count + 1) * this.individualBit)
+                );
+                let currUser = this.activeUser[parseInt(currentBit, 2)]
+                let userRegistNumber = String(currUser.user_registration_number).padStart(3, '0')
+                printOut +=  `user${userRegistNumber} `
+                count++
+            }
+            console.log(printOut)
+        }
+        console.log('')
+    }
+
     private initializePopulation = () => {
+        console.log('Initialize Population')
         for(let i = 0; i < this.populationCount; i++) {
             let population = ''
             for (let j = 0; j < this.weekendSchedule.length; j++) {
+                let assignedUser: any = []
                 for (let k = 0; k < this.weekendSchedule[j].quota; k++) {
                     let randomIndex
                     if (k === 0) {
-                        let coordinators = this.activeUser.filter(user => user.mass_coordination_flag && this.weekendSchedule[j].min_mass_coordination_type >= user.mass_coordination_type)
+                        let coordinators = this.activeUser.filter((user, index) => !assignedUser.includes(index)).filter(user => user.mass_coordination_flag && this.weekendSchedule[j].min_mass_coordination_type >= user.mass_coordination_type)
                         randomIndex = Math.floor(Math.random() * coordinators.length)
                         let selected = coordinators[randomIndex]
                         randomIndex = this.activeUser.findIndex(user => user.id === selected.id)
                     } else {
-                        randomIndex = Math.floor(Math.random() * this.activeUser.length);
+                        do {
+                            randomIndex = Math.floor(Math.random() * this.activeUser.length);
+                        } while (assignedUser.includes(randomIndex))
+                        let users = this.activeUser.filter((user, index) => !assignedUser.includes(index))
                     }
                     // console.log(randomIndex)
                     let individu = randomIndex.toString(2).padStart(this.userMaxBit, '0')
+                    assignedUser.push(randomIndex)
                     population += individu
                 }
             }
             this.population.push(population)
+            console.log('Population ' + (i + 1))
+            this.printCurrentPopulation(population)
         }
     }
 
     private calculateFitness = () => {
+        console.log('Calculate Fitness')
         this.fitness = []
         this.bestFitnessGen = 0
         
@@ -190,6 +238,8 @@ export default class ScheduleService implements IScheduleService {
                 this.bestFitness = this.fitness[i]
                 this.bestPopulation = this.population[i]
             }
+
+            console.log(`Population ${i + 1} Fitness: ` + this.fitness[i])
         }
     }
 
@@ -212,35 +262,72 @@ export default class ScheduleService implements IScheduleService {
                     up: this.pdf[i - 1].up + (item / totalFitness)
                 })
             }
+            console.log('PDF Populasi ' + (i+1) + ': ' + this.pdf[i].down + ' hingga ' + this.pdf[i].up)
         })
     }
 
     private selection = () => {
-        const eliteCount = 2;
-        const newPop: any[] = [];
+        console.log('Selection')
+        // const eliteCount = 2;
+        // const newPop: any[] = [];
 
-        const sortedPop = this.population
-            .map((individual, i) => ({ individual, fitness: this.fitness[i] }))
-            .sort((a, b) => b.fitness - a.fitness);
-        newPop.push(...sortedPop.slice(0, eliteCount).map(item => item.individual));
+        // const sortedPop = this.population
+        //     .map((individual, i) => ({ individual, fitness: this.fitness[i] }))
+        //     .sort((a, b) => b.fitness - a.fitness);
+        // newPop.push(...sortedPop.slice(0, eliteCount).map(item => item.individual));
 
-        while (newPop.length < this.populationCount) {
-            const rand = Math.random();
-            for (let i = 0; i < this.populationCount; i++) {
-                if (rand >= this.pdf[i].down && rand <= this.pdf[i].up) {
-                    if (!newPop.includes(this.population[i])) {
-                        newPop.push(this.population[i]);
-                        break;
-                    }
+        // while (newPop.length < this.populationCount) {
+        //     const rand = Math.random();
+        //     for (let i = 0; i < this.populationCount; i++) {
+        //         if (rand >= this.pdf[i].down && rand <= this.pdf[i].up) {
+        //             if (!newPop.includes(this.population[i])) {
+        //                 newPop.push(this.population[i]);
+        //                 break;
+        //             }
+        //         }
+        //     }
+        // }
+
+        const newPop: any = []
+
+        // let fitnessPop = this.population.map((item, index) => {
+        //     return { pop: item, fitness: this.fitness[index] }
+        // }).sort((a, b) => b.fitness - a.fitness)
+
+        // let tempPop = this.population.map((item, index) => {
+        //     return { pop: item, fitness: this.fitness[index] }
+        // }).sort((a, b) => b.fitness - a.fitness).map(item => item.pop)
+
+        // newPop.push(tempPop[0])
+        // newPop.push(tempPop[1])
+
+        // console.log('0 ' + fitnessPop[0].fitness)
+        // console.log('1 ' + fitnessPop[1].fitness)
+        // console.log('2 ' + fitnessPop[2].fitness)
+        // console.log('3 ' + fitnessPop[3].fitness)
+        // console.log('4 ' + fitnessPop[4].fitness)
+
+        for(let i = 0; i < this.populationCount; i++) {
+            const random = Math.random()
+            console.log('Angka roulette ' + (i+1) + ' ' + random)
+            let j = 0
+            for (j = 0; j < this.populationCount; j++) {
+                if (random >= this.pdf[j].down && random <= this.pdf[j].up) {
+                    console.log('Population '+ (i+1))
+                    this.printCurrentPopulation(this.population[j])
+                    newPop.push(this.population[j])
+                    break
                 }
             }
+            // console.log(i + ' ' + random + ' ' + this.fitness[j] + ' ' +  j)
         }
 
         this.population = newPop;
     }
 
     private crossover = () => {
-        let prob = 0.25
+        console.log('Crossover')
+        let prob = 0.5
         for(let i = 0; i < this.populationCount / 2; i++) {
             let parent1 = this.population[i * 2]
             let parent2 = this.population[i * 2 + 1]
@@ -249,9 +336,12 @@ export default class ScheduleService implements IScheduleService {
             let individual1 = ''
             let individual2 = ''
             let count = 0
+            let numberCrossed = ''
             for(let j = 0; j < this.weekendSchedule.length; j++) {
                 let coordinators = this.activeUser.filter(user => user.mass_coordination_flag && this.weekendSchedule[j].min_mass_coordination_type >= user.mass_coordination_type)
-                for(let k = 0; k < this.weekendSchedule[j].quota; k++) {
+                let parent1User: any = []
+                let parent2User: any = []
+                for (let k = 0; k < this.weekendSchedule[j].quota; k++) {
                     individual1 = parent1.substring(
                         (count * this.individualBit),
                         ((count + 1) * this.individualBit)
@@ -261,62 +351,53 @@ export default class ScheduleService implements IScheduleService {
                         ((count + 1) * this.individualBit)
                     );
 
-                    let temp1 = ''
-                    let temp2 = ''
-
-                    for(let l = 0; l < individual1.length; l++) {
-                        let rand = Math.random()
-                        if (rand < prob) {
-                            temp1 += individual2[l]
-                            temp2 += individual1[l]
+                    let individual1Id = this.activeUser[parseInt(individual1, 2)].id
+                    let individual2Id = this.activeUser[parseInt(individual2, 2)].id
+                    let rand = Math.random()
+                    if (rand < prob) {
+                        numberCrossed += String(count) + ' '
+                        if (parent1User.includes(individual1) || parent2User.includes(individual2)) {
+                            child1 += individual1
+                            child2 += individual2
+                            parent1User.push(individual1)
+                            parent2User.push(individual2)
                         } else {
-                            temp1 += individual1[l]
-                            temp2 += individual2[l]
+                            child1 += individual2
+                            child2 += individual1
+                            parent1User.push(individual2)
+                            parent2User.push(individual1)
                         }
+                    } else {
+                        child1 += individual1
+                        child2 += individual2
+                        parent1User.push(individual1)
+                        parent2User.push(individual2)
                     }
-
-                    if(parseInt(temp1, 2) >= this.activeUser.length || parseInt(temp1, 2) < 0) {
-                        let randomIndex
-                        if (k === 0) {
-                            randomIndex = Math.floor(Math.random() * coordinators.length)
-                            let selected = coordinators[randomIndex]
-                            randomIndex = this.activeUser.findIndex(user => user.id === selected.id)
-                        } else {
-                            randomIndex = Math.floor(Math.random() * this.activeUser.length);
-                        }
-                        let individu = randomIndex.toString(2).padStart(this.userMaxBit, '0')
-                        temp1 = individu
-                    }
-
-                    if(parseInt(temp2, 2) >= this.activeUser.length || parseInt(temp2, 2) < 0) {
-                        let randomIndex
-                        if (k === 0) {
-                            randomIndex = Math.floor(Math.random() * coordinators.length)
-                            let selected = coordinators[randomIndex]
-                            randomIndex = this.activeUser.findIndex(user => user.id === selected.id)
-                        } else {
-                            randomIndex = Math.floor(Math.random() * this.activeUser.length);
-                        }
-                        let individu = randomIndex.toString(2).padStart(this.userMaxBit, '0')
-                        temp2 = individu
-                    }
-
-                    child1 += temp1
-                    child2 += temp2
                     count++
                 }
             }
             this.population[i * 2] = child1
             this.population[i * 2 + 1] = child2
+            console.log('User Crossover: ' + numberCrossed)
+            console.log(`Population ${(i * 2) + 1}`)
+            this.printCurrentPopulation(child1)
+            console.log(`Population ${(i * 2 + 1) + 1}`)
+            this.printCurrentPopulation(child2)
         }
     }
 
     private mutation = () => {
+        console.log('Mutation')
         let mutationRate = 0.0125
         this.beforeMutation = this.population
         for(let i = 0; i < this.populationCount; i++) {
             let count = 0
             let newPopulation = ''
+            let mutatedUser = ''
+            let tempPop = this.activeUser.map(user => {
+                return { ...user, count: 0 }
+            })
+            let numberMutated = ''
             for (let j = 0; j < this.weekendSchedule.length; j++) {
                 for (let k = 0; k < this.weekendSchedule[j].quota; k++) {
                     let newIndividual = ''
@@ -324,32 +405,33 @@ export default class ScheduleService implements IScheduleService {
                         (count * this.individualBit),
                         ((count + 1) * this.individualBit)
                     );
+
+
                     let newBit = currUserIndex.split('').map((bit) => bit === '0' ? '1' : '0').join('')
-                    
                     
                     let rand = Math.random()
                     if (rand < mutationRate) {
-                        let newBitNumber = parseInt(newBit, 2)
-                        // console.log(newBitNumber)
-                        newIndividual = newBit
-                        if (newBitNumber >= this.activeUser.length || newBitNumber < 0) {
-                            newIndividual = currUserIndex
+                        numberMutated += String(count) + ' '
+                        if (parseInt(newBit, 2) >= this.activeUser.length || parseInt(newBit, 2) <= 0) {
+                            let randomUser = Math.floor(Math.random() * this.activeUser.length)
+                            let randomUserBit = randomUser.toString(2).padStart(this.userMaxBit, '0')
+                            newPopulation += randomUserBit
                         } else {
-                            newIndividual = newBit
+                            newPopulation += newBit
                         }
-                        newPopulation += newIndividual
+                        mutatedUser += String(mutatedUser) + ' '
                     } else {
-                        newIndividual = currUserIndex
-                        newPopulation += newIndividual
+                        newPopulation += currUserIndex
                     }
-                    currUserIndex = newPopulation.substring(
-                        (count * this.individualBit),
-                        ((count + 1) * this.individualBit)
-                    );
+
                     count++
                 }
             }
-            this.population[i] = this.checkValidation(newPopulation)
+            // this.population[i] = this.checkValidation(newPopulation)
+            this.population[i] = newPopulation
+            console.log(`Population ${i + 1}`)
+            console.log(`Mutated User Index: ${numberMutated ? numberMutated : 'null'}`)
+            this.printCurrentPopulation(this.population[i])
         }   
     }
 
@@ -382,42 +464,18 @@ export default class ScheduleService implements IScheduleService {
                 );
 
                 if (assignmentCount[currIndex].count > 2) {
-                    const validUsers = assignmentCount.filter(user => user.count < 2);
-                    const newIndex = Math.floor(Math.random() * validUsers.length);
-                    const validUserIndex = this.activeUser.findIndex(user => user.id === validUsers[newIndex].id);
-                    repaired += validUserIndex.toString(2).padStart(this.userMaxBit, '0');
-                    assignmentCount[validUserIndex].count = assignmentCount[validUserIndex].count - 1
-                } else if (
-                    (k === 0 && !this.activeUser[currIndex].mass_coordination_flag) && 
-                    (k === 0 && this.activeUser[currIndex].mass_coordination_type < currentSchedule.min_mass_coordination_type)
-                ) {
-                    const validUsers = assignmentCount.filter(user => (user.count < 2 && user.mass_coordination_flag) && user.mass_coordination_type >= currentSchedule.min_mass_coordination_type);
-                    const newIndex = Math.floor(Math.random() * validUsers.length);
-                    const validUserIndex = this.activeUser.findIndex(user => user.id === validUsers[newIndex].id);
-                    repaired += validUserIndex.toString(2).padStart(this.userMaxBit, '0');
+                    
+                    let tempUserList = assignmentCount.filter(user => user.count < 2)
+                    let tempUserIndex = Math.floor(Math.random() * tempUserList.length)
+                    let tempUser = tempUserList[tempUserIndex] 
+                    let newUser = assignmentCount.findIndex(user => user.id === tempUser.id)
+                    repaired += newUser.toString(2).padStart(this.userMaxBit, '0')
+                    assignmentCount[currIndex].count -= 1
+                    assignmentCount[newUser].count += 1
+
                 } else {
-                    repaired += individual.substring(
-                        count * this.individualBit,
-                        (count + 1) * this.individualBit
-                    );
+                    repaired += individual.substring(count * this.individualBit, (count + 1) * this.individualBit)
                 }
-                // if (
-                //     assignmentCount[currIndex].count > 2 ||
-                //     (k === 0 && !this.activeUser[currIndex].mass_coordination_flag) ||
-                //     (k === 0 && this.activeUser[currIndex].mass_coordination_type < currentSchedule.min_mass_coordination_type)
-                // ) {
-                //     // Reassign to a valid individual
-                //     const validUsers = assignmentCount.filter(user => user.count < 2);
-                //     const newIndex = Math.floor(Math.random() * validUsers.length);
-                //     const validUserIndex = this.activeUser.findIndex(user => user.id === validUsers[newIndex].id);
-                //     repaired += validUserIndex.toString(2).padStart(this.userMaxBit, '0');
-                //     assignmentCount[validUserIndex].count = assignmentCount[validUserIndex].count - 1
-                // } else {
-                //     repaired += individual.substring(
-                //         count * this.individualBit,
-                //         (count + 1) * this.individualBit
-                //     );
-                // }
 
                 count++;
             }
@@ -457,10 +515,11 @@ export default class ScheduleService implements IScheduleService {
     }
 
     private geneticSchedule = () => {
-        const generation = 100
+        const generation = 3
         this.initializePopulation()
         console.log('>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>')
         for(let i = 0; i < generation; i++) {
+            console.log(`Generation ${i + 1}`)
             this.calculateFitness()
 
             // let topFitness = this.fitness
@@ -475,13 +534,14 @@ export default class ScheduleService implements IScheduleService {
             this.selection()
             this.crossover()
             this.mutation()
+            console.log('>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>')
 
             // for (let j = 0; j < elites.length; j++) {
             //     this.population[j] = ''
             //     this.population[j] = elites[j];
             // }
             // this.checkValidation()
-            console.log(`Generation ${i + 1} best fitness is ${this.bestFitnessGen}`)
+            // console.log(`Generation ${i + 1} best fitness is ${this.bestFitnessGen}`)
         }
         // let bestPopulation = this.fitness.findIndex()
     }
