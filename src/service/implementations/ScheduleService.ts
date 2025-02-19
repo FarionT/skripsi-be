@@ -18,6 +18,7 @@ import { group } from "console";
 import IScheduleService from "../contracts/IScheduleService";
 import { ISchedule } from "../../models/interfaces/ISchedule";
 import { startOfMonth, endOfMonth, eachDayOfInterval } from 'date-fns';
+import { assign } from 'lodash';
 
 const { user: User, schedule: Schedule,  prodeacon_schedule: ProdeaconSchedule, church: Church, role: Role, church_schedule: ChurchSchedule } = db;
 
@@ -41,6 +42,11 @@ export default class ScheduleService implements IScheduleService {
     private thisMonthSchedules;
     private firstChruch
     private populationCount
+    private preferenceCount
+    private coordinatorCount
+    private consecutiveCount
+    private distributeCount
+    private plot
 
     constructor(){
         this.churchDao = new ChurchDao()
@@ -49,9 +55,14 @@ export default class ScheduleService implements IScheduleService {
         this.pdf = []
         this.beforeMutation = []
         this.thisMonthSchedules = []
-        this.bestPopulation = ''
+        this.bestPopulation = []
         this.bestFitness = 0
-        this.populationCount = 2
+        this.populationCount = 50
+        this.preferenceCount = 0
+        this.coordinatorCount = 0
+        this.consecutiveCount = 0
+        this.distributeCount = 0
+        this.plot = []
     }
 
     private prodeaconsValidation = (schedule: ISchedule): { message: string, flag: boolean } => {
@@ -130,49 +141,60 @@ export default class ScheduleService implements IScheduleService {
     private initializePopulation = () => {
         console.log('Initialize Population')
         for(let i = 0; i < this.populationCount; i++) {
-            let population = ''
+            let population: any = []
+            // let currentWeek = this.weekendSchedule[0].week
+            let assignedUser: any = []
             for (let j = 0; j < this.weekendSchedule.length; j++) {
-                let assignedUser: any = []
-                for (let k = 0; k < this.weekendSchedule[j].quota; k++) {
-                    let randomIndex
-                    if (k === 0) {
-                        let coordinators = this.activeUser.filter((user, index) => !assignedUser.includes(index)).filter(user => user.mass_coordination_flag && this.weekendSchedule[j].min_mass_coordination_type >= user.mass_coordination_type)
-                        randomIndex = Math.floor(Math.random() * coordinators.length)
-                        let selected = coordinators[randomIndex]
-                        randomIndex = this.activeUser.findIndex(user => user.id === selected.id)
-                    } else {
-                        do {
-                            randomIndex = Math.floor(Math.random() * this.activeUser.length);
-                        } while (assignedUser.includes(randomIndex))
-                        let users = this.activeUser.filter((user, index) => !assignedUser.includes(index))
-                    }
-                    // console.log(randomIndex)
-                    let individu = randomIndex.toString(2).padStart(this.userMaxBit, '0')
-                    assignedUser.push(randomIndex)
-                    population += individu
+                let scheduleUser: any = []
+                if (j !== 0 && this.weekendSchedule[j].week !== this.weekendSchedule[j-1].week) {
+                    assignedUser = []
                 }
+                // let tempUser: any = []
+                for (let k = 0; k < this.weekendSchedule[j].quota; k++) {
+                    let randomIndex, user, selected
+                    if (k === 0) {
+                        let coordinators = this.activeUser.filter((user, index) => user.mass_coordination_flag)
+                        randomIndex = Math.floor(Math.random() * coordinators.length)
+                        selected = coordinators[randomIndex]
+                    } else {
+                        // user = this.activeUser.filter((user, index) => !assignedUser.includes(index))
+                        user = this.activeUser
+                        randomIndex = Math.floor(Math.random() * user.length)
+                        selected = user[randomIndex]
+                    }
+                    randomIndex = this.activeUser.findIndex(user => user.id === selected.id)
+                    user = this.activeUser[randomIndex]
+                    // let individu = this.activeUser[randomIndex]
+                    // assignedUser.push(randomIndex)
+                    scheduleUser.push(user)
+                    // population += individu
+                }
+                // scheduleUser.map(user => console.log(user.user_registration_number))
+                population.push(scheduleUser)
             }
             this.population.push(population)
-            console.log('Population ' + (i + 1))
-            this.printCurrentPopulation(population)
+            // console.log('Population ' + (i + 1))
+            // console.log(population)
+            // this.printCurrentPopulation(population)
         }
     }
 
     private calculateFitness = () => {
-        console.log('Calculate Fitness')
+        // console.log('Calculate Fitness')
         this.fitness = []
         this.bestFitnessGen = 0
         
         let currBest = 0
-        let coordinatorPenalty = 5
-        let distributedPenalty = 10
-        let prefrencedSchedulePenalty = 15
-        let consecutivePenalty = 25
+        let coordinatorPenalty = 10
+        let distributedPenalty = 8
+        let prefrencedSchedulePenalty = 12
+        let consecutivePenalty = 7
         let totalProdeacons = this.weekendSchedule.reduce((total, item) => {
             return total + item.quota
         }, 0)
         let maxPenalty = (coordinatorPenalty * this.weekendSchedule.length) + (distributedPenalty * this.weekendSchedule.length) + 
-        (prefrencedSchedulePenalty * totalProdeacons) + (consecutivePenalty * this.activeUser.length)
+        (prefrencedSchedulePenalty * totalProdeacons) + (2 * consecutivePenalty * totalProdeacons)
+        // + (consecutivePenalty * this.activeUser.length)
         for(let i = 0; i < this.populationCount; i++) {
             let count = 0
             let penalty = 0
@@ -180,51 +202,86 @@ export default class ScheduleService implements IScheduleService {
                 return { ...user, count: 0 }
             })
 
+            let currPopulation = this.population[i]
+            let preferenceCount = 0
+            let coordinatorCount = 0
+            let consecutiveCount = 0
+            let distributeCount = 0
+            let assignedUser: any = []
             for(let j = 0; j < this.weekendSchedule.length; j++) {
-                let currentSchedule = this.weekendSchedule[j]
+                const currWeek = this.thisMonthSchedules.filter(schedule => schedule.week === this.weekendSchedule[j].week)
+                const currWeekFirstChurch = currWeek.filter(schedule => schedule.church_id === this.weekendSchedule[j].church_id)
+                const currWeekFirstChurchId = currWeekFirstChurch.map(schedule => schedule.prodeacons.map(user => user)).map(user => user.id)
+                const currWeekSecondChurch = currWeek.filter(schedule => schedule.church_id !== this.weekendSchedule[j].church_id)
+                const currWeekSecondChurchSat = currWeek.filter(schedule => schedule.day === 0)
+                const currWeekSecondChurchSatId = currWeekSecondChurchSat.flatMap(schedule => schedule.prodeacons).map(user => user.id) 
+                const currWeekSecondChurchSun = currWeek.filter(schedule => schedule.day === 1)
+                const currWeekSecondChurchSunId = currWeekSecondChurchSun.flatMap(schedule => schedule.prodeacons).map(user => user.id) 
+                
+                const currWeekSecondChurchId = currWeekSecondChurch.flatMap(schedule => schedule.prodeacons).map(user => user.id) 
+                let currSchedule = currPopulation[j]
                 let amanCount = 0
+                if (j !== 0 && this.weekendSchedule[j].week !== this.weekendSchedule[j-1].week) {
+                    assignedUser = []
+                }
                 for(let k = 0; k < this.weekendSchedule[j].quota; k++) {
-                    let currUserIndex = this.population[i].substring(
-                        (count * this.individualBit),
-                        ((count + 1) * this.individualBit)
-                    );
-
-                    let currUser = this.activeUser[parseInt(currUserIndex, 2)]
-                    this.activeUser[parseInt(currUserIndex, 2)].count = this.activeUser[parseInt(currUserIndex, 2)].count + 1
-
+                    let currUser = currSchedule[k]
                     // If it is not the user preferenced schedule
-                    if (!currUser.preferential_schedules.includes(currentSchedule.church_schedule_id)) {
+                    if (!currUser.preferential_schedules.includes(this.weekendSchedule[j].church_schedule_id)) {
+                        // console.log(currUser.preferential_schedules + ' ' + currSchedule.church_schedule_id)
                         penalty += prefrencedSchedulePenalty
+                        preferenceCount++
                     }
 
                     // If the user doen't want to be a coordinator and its type doesn't match the requirement
                     if (k === 0) {
-                        if (!(currUser.mass_coordination_flag && currentSchedule.min_mass_coordination_type >= currUser.mass_coordination_type)) {
+                        if (!(this.weekendSchedule[j].min_mass_coordination_type >= currUser.mass_coordination_type)) {
                             penalty += coordinatorPenalty
+                            coordinatorCount++
                         }
                     }
-
-                    // If the user has consecutive schedules
-                    // if ()
 
                     if (currUser.status === 'aman') {
                         amanCount++
                     }
 
+                    if (currSchedule.day === 0) {
+                        if (currWeekSecondChurchSatId.includes(currUser.id)) {
+                            penalty += consecutivePenalty
+                            consecutiveCount++
+                        }
+                    } else {
+                        if (currWeekSecondChurchSunId.includes(currUser.id)) {
+                            penalty += consecutivePenalty
+                            consecutiveCount++
+                        }
+                    }
+
+                    // if (currWeekSecondChurchId.includes(currUser.id)) {
+                    //     penalty += consecutivePenalty
+                    //     consecutiveCount++
+                    // }
+
+                    if (assignedUser.includes(currUser.id)) {
+                        penalty += consecutivePenalty
+                        consecutiveCount++
+                    }
+                    assignedUser.push(currUser.id)
                     count++
                 }
-
+                
                 // If the schedule status doesn't evenly distributed
-                if (amanCount < Math.ceil(currentSchedule.quota * 0.7)) {
+                if (amanCount < Math.ceil(this.weekendSchedule[j].quota * 0.7)) {
                     penalty += distributedPenalty
+                    distributeCount++
                 }
             }
             count = 0
-            for (let j = 0; j < this.activeUser.length; j++) {
-                if (this.activeUser[j].count > 2) {
-                    penalty += consecutivePenalty
-                }
-            }
+            // for (let j = 0; j < this.activeUser.length; j++) {
+            //     if (this.activeUser[j].count > 2) {
+            //         penalty += consecutivePenalty
+            //     }
+            // }
 
             let currFitness = (100 - ((penalty / maxPenalty) * 100))
             // console.log("Population " + i + " " + currFitness)
@@ -237,9 +294,14 @@ export default class ScheduleService implements IScheduleService {
             if (this.fitness[i] > this.bestFitness) {
                 this.bestFitness = this.fitness[i]
                 this.bestPopulation = this.population[i]
+                this.distributeCount = distributeCount
+                this.preferenceCount = preferenceCount
+                this.coordinatorCount = coordinatorCount
+                this.consecutiveCount = consecutiveCount
             }
 
-            console.log(`Population ${i + 1} Fitness: ` + this.fitness[i])
+            // console.log(`Population ${i + 1} Fitness: ` + this.fitness[i])
+            // console.log('Population ' + (i+1) + ' ' + preferenceCount + ' '+ coordinatorCount + ' ')
         }
     }
 
@@ -262,12 +324,12 @@ export default class ScheduleService implements IScheduleService {
                     up: this.pdf[i - 1].up + (item / totalFitness)
                 })
             }
-            console.log('PDF Populasi ' + (i+1) + ': ' + this.pdf[i].down + ' hingga ' + this.pdf[i].up)
+            // console.log('PDF Populasi ' + (i+1) + ': ' + this.fitness[i] + ' yaitu ' + this.pdf[i].down + ' hingga ' + this.pdf[i].up)
         })
     }
 
     private selection = () => {
-        console.log('Selection')
+        // console.log('Selection')
         // const eliteCount = 2;
         // const newPop: any[] = [];
 
@@ -290,16 +352,17 @@ export default class ScheduleService implements IScheduleService {
 
         const newPop: any = []
 
-        // let fitnessPop = this.population.map((item, index) => {
-        //     return { pop: item, fitness: this.fitness[index] }
-        // }).sort((a, b) => b.fitness - a.fitness)
+        let fitnessPop = this.population.map((item, index) => {
+            return { pop: item, fitness: this.fitness[index] }
+        }).sort((a, b) => b.fitness - a.fitness)
 
-        // let tempPop = this.population.map((item, index) => {
-        //     return { pop: item, fitness: this.fitness[index] }
-        // }).sort((a, b) => b.fitness - a.fitness).map(item => item.pop)
+        let tempPop = this.population.map((item, index) => {
+            return { pop: item, fitness: this.fitness[index] }
+        }).sort((a, b) => b.fitness - a.fitness).map(item => item.pop)
 
-        // newPop.push(tempPop[0])
-        // newPop.push(tempPop[1])
+        newPop.push(tempPop[0])
+        newPop.push(tempPop[1])
+        newPop.push(tempPop[2])
 
         // console.log('0 ' + fitnessPop[0].fitness)
         // console.log('1 ' + fitnessPop[1].fitness)
@@ -307,14 +370,14 @@ export default class ScheduleService implements IScheduleService {
         // console.log('3 ' + fitnessPop[3].fitness)
         // console.log('4 ' + fitnessPop[4].fitness)
 
-        for(let i = 0; i < this.populationCount; i++) {
+        for(let i = 3; i < this.populationCount; i++) {
             const random = Math.random()
-            console.log('Angka roulette ' + (i+1) + ' ' + random)
+            // console.log('Angka roulette ' + (i+1) + ' ' + random)
             let j = 0
             for (j = 0; j < this.populationCount; j++) {
                 if (random >= this.pdf[j].down && random <= this.pdf[j].up) {
-                    console.log('Population '+ (i+1))
-                    this.printCurrentPopulation(this.population[j])
+                    // console.log('Population '+ (i+1))
+                    // this.printCurrentPopulation(this.population[j])
                     newPop.push(this.population[j])
                     break
                 }
@@ -325,113 +388,129 @@ export default class ScheduleService implements IScheduleService {
         this.population = newPop;
     }
 
+    private tournamentSelection = () => {
+        let fitnessPop = this.population.map((item, index) => {
+            return { pop: item, fitness: this.fitness[index] }
+        }).sort((a, b) => b.fitness - a.fitness)
+
+        let tempPop = this.population.map((item, index) => {
+            return { pop: item, fitness: this.fitness[index] }
+        }).sort((a, b) => b.fitness - a.fitness).map(item => item.pop)
+
+        let selectedPop: any = []
+        for (let i = 0; i < 5; i++){
+            let rand = Math.floor(Math.random() *  fitnessPop.length)
+            selectedPop.push(fitnessPop[rand])
+        }
+
+        selectedPop = selectedPop.sort((a, b) => b.fitness - a.fitness).map(item => item.pop)
+        return selectedPop[0]
+    }
+
     private crossover = () => {
-        console.log('Crossover')
-        let prob = 0.5
-        for(let i = 0; i < this.populationCount / 2; i++) {
-            let parent1 = this.population[i * 2]
-            let parent2 = this.population[i * 2 + 1]
-            let child1 = ''
-            let child2 = ''
-            let individual1 = ''
-            let individual2 = ''
+        // console.log('Crossover')
+        let prob = 0.25
+        for(let i = 0; i < this.populationCount; i++) {
+            // let parent1 = this.population[i * 2]
+            // let parent2 = this.population[i * 2 + 1]
+            let parent1 = this.tournamentSelection()
+            let parent2 = this.tournamentSelection()
+            let newPop1: any = []
+            let newPop2: any = []
             let count = 0
             let numberCrossed = ''
             for(let j = 0; j < this.weekendSchedule.length; j++) {
-                let coordinators = this.activeUser.filter(user => user.mass_coordination_flag && this.weekendSchedule[j].min_mass_coordination_type >= user.mass_coordination_type)
-                let parent1User: any = []
-                let parent2User: any = []
+                let child1: any = []
+                let child2: any = []
+                let parent1Schedule = parent1[j]
+                let parent2Schedule = parent2[j]
                 for (let k = 0; k < this.weekendSchedule[j].quota; k++) {
-                    individual1 = parent1.substring(
-                        (count * this.individualBit),
-                        ((count + 1) * this.individualBit)
-                    );
-                    individual2 = parent2.substring(
-                        (count * this.individualBit),
-                        ((count + 1) * this.individualBit)
-                    );
-
-                    let individual1Id = this.activeUser[parseInt(individual1, 2)].id
-                    let individual2Id = this.activeUser[parseInt(individual2, 2)].id
                     let rand = Math.random()
                     if (rand < prob) {
                         numberCrossed += String(count) + ' '
-                        if (parent1User.includes(individual1) || parent2User.includes(individual2)) {
-                            child1 += individual1
-                            child2 += individual2
-                            parent1User.push(individual1)
-                            parent2User.push(individual2)
+                        if (child1.includes(parent2Schedule[k]) || child2.includes(parent1Schedule[k])) {
+                            child1.push(parent1Schedule[k])
+                            child2.push(parent2Schedule[k])
                         } else {
-                            child1 += individual2
-                            child2 += individual1
-                            parent1User.push(individual2)
-                            parent2User.push(individual1)
+                            child1.push(parent2Schedule[k])
+                            child2.push(parent1Schedule[k])
                         }
                     } else {
-                        child1 += individual1
-                        child2 += individual2
-                        parent1User.push(individual1)
-                        parent2User.push(individual2)
+                        child1.push(parent1Schedule[k])
+                        child2.push(parent2Schedule[k])
                     }
                     count++
                 }
+                newPop1.push(child1)
+                newPop2.push(child1)
             }
-            this.population[i * 2] = child1
-            this.population[i * 2 + 1] = child2
-            console.log('User Crossover: ' + numberCrossed)
-            console.log(`Population ${(i * 2) + 1}`)
-            this.printCurrentPopulation(child1)
-            console.log(`Population ${(i * 2 + 1) + 1}`)
-            this.printCurrentPopulation(child2)
+            this.population[i * 2] = newPop1
+            this.population[i * 2 + 1] = newPop2
+            // console.log('User Crossover: ' + numberCrossed)
+            // console.log(`Population ${(i * 2) + 1}`)
+            // this.printCurrentPopulation(child1)
+            // console.log(`Population ${(i * 2 + 1) + 1}`)
+            // this.printCurrentPopulation(child2)
         }
     }
 
     private mutation = () => {
-        console.log('Mutation')
+        // console.log('Mutation')
         let mutationRate = 0.0125
         this.beforeMutation = this.population
         for(let i = 0; i < this.populationCount; i++) {
             let count = 0
-            let newPopulation = ''
-            let mutatedUser = ''
-            let tempPop = this.activeUser.map(user => {
-                return { ...user, count: 0 }
-            })
             let numberMutated = ''
+            let assignedUser: any = []
             for (let j = 0; j < this.weekendSchedule.length; j++) {
-                for (let k = 0; k < this.weekendSchedule[j].quota; k++) {
-                    let newIndividual = ''
-                    let currUserIndex = this.population[i].substring(
-                        (count * this.individualBit),
-                        ((count + 1) * this.individualBit)
-                    );
-
-
-                    let newBit = currUserIndex.split('').map((bit) => bit === '0' ? '1' : '0').join('')
-                    
+                let currSchedule = this.population[i][j]
+                let newSchedule: any = []
+                let currScheduleUserId = currSchedule.map(user => user.id)
+                if (j !== 0 && this.weekendSchedule[j].week !== this.weekendSchedule[j-1].week) {
+                    assignedUser = []
+                }
+                for (let k = 0; k < this.weekendSchedule[j].quota; k++) {                    
                     let rand = Math.random()
                     if (rand < mutationRate) {
+                        let userList
+                        const currWeek = this.thisMonthSchedules.filter(schedule => schedule.week === this.weekendSchedule[j].week)
+                        const currWeekFirstChurch = currWeek.filter(schedule => schedule.church_id === this.weekendSchedule[j].church_id)
+                        const currWeekFirstChurchId = currWeekFirstChurch.map(schedule => schedule.prodeacons.map(user => user)).map(user => user.id)
+                        const currWeekSecondChurch = currWeek.filter(schedule => schedule.church_id !== this.weekendSchedule[j].church_id)
+                        const currWeekSecondChurchId = currWeekSecondChurch.flatMap(schedule => schedule.prodeacons).map(user => user.id) 
+                        const currWeekSecondChurchSat = currWeek.filter(schedule => schedule.day === 0)
+                        const currWeekSecondChurchSatId = currWeekSecondChurchSat.flatMap(schedule => schedule.prodeacons).map(user => user.id) 
+                        const currWeekSecondChurchSun = currWeek.filter(schedule => schedule.day === 1)
+                        const currWeekSecondChurchSunId = currWeekSecondChurchSun.flatMap(schedule => schedule.prodeacons).map(user => user.id) 
                         numberMutated += String(count) + ' '
-                        if (parseInt(newBit, 2) >= this.activeUser.length || parseInt(newBit, 2) <= 0) {
-                            let randomUser = Math.floor(Math.random() * this.activeUser.length)
-                            let randomUserBit = randomUser.toString(2).padStart(this.userMaxBit, '0')
-                            newPopulation += randomUserBit
+                        if (k === 0) {
+                            if (currSchedule.day === 0) {
+                                userList = this.activeUser.filter(user => !currScheduleUserId.includes(user.id) && !currWeekSecondChurchSatId.includes(user.id)).filter(user => user.mass_coordination_flag === true)
+                            } else {
+                                userList = this.activeUser.filter(user => !currScheduleUserId.includes(user.id) && !currWeekSecondChurchSunId.includes(user.id)).filter(user => user.mass_coordination_flag === true)
+                            }
                         } else {
-                            newPopulation += newBit
+                            if (currSchedule.day === 0) {
+                                userList = this.activeUser.filter(user => !currScheduleUserId.includes(user.id) && !currWeekSecondChurchSatId.includes(user.id))
+                            } else {
+                                userList = this.activeUser.filter(user => !currScheduleUserId.includes(user.id) && !currWeekSecondChurchSunId.includes(user.id))
+
+                            }
                         }
-                        mutatedUser += String(mutatedUser) + ' '
-                    } else {
-                        newPopulation += currUserIndex
+                        let newIndividual = Math.floor(Math.random() * userList.length)
+                        newIndividual = userList[newIndividual]
+                        this.population[i][j][k] = newIndividual
+                        assignedUser.push(newIndividual)
                     }
 
                     count++
                 }
             }
             // this.population[i] = this.checkValidation(newPopulation)
-            this.population[i] = newPopulation
-            console.log(`Population ${i + 1}`)
-            console.log(`Mutated User Index: ${numberMutated ? numberMutated : 'null'}`)
-            this.printCurrentPopulation(this.population[i])
+            // this.population[i] = newPopulation
+            // console.log(`Population ${i + 1}`)
+            // console.log(`Mutated User Index: ${numberMutated ? numberMutated : 'null'}`)
+            // this.printCurrentPopulation(this.population[i])
         }   
     }
 
@@ -485,42 +564,63 @@ export default class ScheduleService implements IScheduleService {
     }
 
     private decode = () => {
-        let count = 0
+        // let count = 0
+        // let solution: any = []
+        // for(let i = 0; i < this.weekendSchedule.length; i++) {
+        //     for(let j = 0; j < this.weekendSchedule[i].quota; j++) {
+        //         let currUserIndex = this.bestPopulation.substring(
+        //             (count * this.individualBit),
+        //             ((count + 1) * this.individualBit)
+        //         );
+
+        //         currUserIndex = parseInt(currUserIndex, 2)
+        //         let currUser = this.activeUser[currUserIndex]
+        //         if (j === 0) {
+        //             solution.push({
+        //                 schedule_id: this.weekendSchedule[i].id,
+        //                 user_id: currUser.id,
+        //                 mass_coordinator: true
+        //             })
+        //         }
+        //         solution.push({
+        //             schedule_id: this.weekendSchedule[i].id,
+        //             user_id: currUser.id,
+        //             mass_coordinator: false
+        //         })
+        //         count++
+        //     }
+        // }
         let solution: any = []
         for(let i = 0; i < this.weekendSchedule.length; i++) {
-            for(let j = 0; j < this.weekendSchedule[i].quota; j++) {
-                let currUserIndex = this.bestPopulation.substring(
-                    (count * this.individualBit),
-                    ((count + 1) * this.individualBit)
-                );
-
-                currUserIndex = parseInt(currUserIndex, 2)
-                let currUser = this.activeUser[currUserIndex]
+            for (let j = 0; j < this.weekendSchedule[i].quota; j++) {
                 if (j === 0) {
                     solution.push({
                         schedule_id: this.weekendSchedule[i].id,
-                        user_id: currUser.id,
+                        user_id: this.bestPopulation[i][j].id,
                         mass_coordinator: true
                     })
                 }
                 solution.push({
                     schedule_id: this.weekendSchedule[i].id,
-                    user_id: currUser.id,
+                    user_id: this.bestPopulation[i][j].id,
                     mass_coordinator: false
                 })
-                count++
             }
         }
         return solution
     }
 
     private geneticSchedule = () => {
-        const generation = 3
+        const generation = 1000
         this.initializePopulation()
-        console.log('>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>')
-        for(let i = 0; i < generation; i++) {
-            console.log(`Generation ${i + 1}`)
-            this.calculateFitness()
+        this.calculateFitness()
+        // console.log('>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>')
+        let i = 0
+        console.log(this.activeUser.length)
+        console.log(`Generation 1 best fitness is ${this.bestFitnessGen}`)
+        for(let i = 1; i < generation; i++) {
+        // while (this.bestFitness < 100) {
+            // console.log(`Generation ${i + 1}`)
 
             // let topFitness = this.fitness
             //     .map((fit, idx) => ({ fit, idx }))
@@ -530,20 +630,29 @@ export default class ScheduleService implements IScheduleService {
             
             // let elites = topFitness.map((item) => this.population[item])
 
-            this.calculatePDF()
-            this.selection()
+            // this.calculatePDF()
+            // this.selection()
             this.crossover()
             this.mutation()
-            console.log('>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>')
+            // console.log('>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>')
 
             // for (let j = 0; j < elites.length; j++) {
             //     this.population[j] = ''
             //     this.population[j] = elites[j];
             // }
             // this.checkValidation()
-            // console.log(`Generation ${i + 1} best fitness is ${this.bestFitnessGen}`)
+            this.calculateFitness()
+            console.log(`Generation ${i + 1} best fitness is ${this.bestFitnessGen}`)
+            this.plot.push({
+                x: i + 1,
+                y: this.bestFitnessGen
+            })
+            // console.log('(' + (i+1) + ',' + this.bestFitnessGen + ')')
+            // i++
         }
+        console.log(`Best Fitness is ${this.bestFitness} with Preference Count ${this.preferenceCount}, Coordinator Count ${this.coordinatorCount}, Distribution Count ${this.distributeCount}, Consecutive Count ${this.consecutiveCount}`)
         // let bestPopulation = this.fitness.findIndex()
+        // console.log(this.plot)
     }
 
     listAllSchedules = async () => {
@@ -1043,10 +1152,7 @@ export default class ScheduleService implements IScheduleService {
             // }))                
 
             // Filtering the active user
-            let unavailableUser: any = []
-            
-            
-            const prodeaconSchedules:any = []
+            let unavailableUser: any = []       
             // Declaring all value for genetic algorithm
             this.thisMonthSchedules = thisMonthSchedules
             this.weekendSchedule = weekendSchedule
@@ -1056,6 +1162,12 @@ export default class ScheduleService implements IScheduleService {
             this.individualBit = this.userMaxBit
             this.activeUser = allUser
             this.population = []
+            this.bestFitness = 0
+            this.preferenceCount = 0
+            this.coordinatorCount = 0
+            this.distributeCount = 0
+            this.consecutiveCount = 0
+            this.plot = []
             this.geneticSchedule()
             // Assigning random user to the schedule
             // getting one week before
@@ -1073,12 +1185,12 @@ export default class ScheduleService implements IScheduleService {
             //     let temp
                 
             //     // Previous Week
-            //     const prevWeek = thisMonthSchedules.filter(schedule => schedule.week === week)
-            //     const prevWeekUser = prevWeek.flatMap(item => item.prodeacons)
-            //     const prevWeekFirstChurch = prevWeek.filter(schedule => schedule.church_id === scheduleBody.church_id)
-            //     const prevWeekFirstChurchId = prevWeekFirstChurch.map(schedule => schedule.prodeacons.map(user => user)).map(user => user.id)
-            //     const prevWeekSecondChurch = prevWeek.filter(schedule => schedule.church_id !== scheduleBody.church_id)
-            //     const prevWeekSecodChurchId = prevWeekSecondChurch.map(schedule => schedule.prodeacons.map(user => user)).map(user => user.id)
+                // const prevWeek = thisMonthSchedules.filter(schedule => schedule.week === week)
+                // const prevWeekUser = prevWeek.flatMap(item => item.prodeacons)
+                // const prevWeekFirstChurch = prevWeek.filter(schedule => schedule.church_id === scheduleBody.church_id)
+                // const prevWeekFirstChurchId = prevWeekFirstChurch.map(schedule => schedule.prodeacons.map(user => user)).map(user => user.id)
+                // const prevWeekSecondChurch = prevWeek.filter(schedule => schedule.church_id !== scheduleBody.church_id)
+                // const prevWeekSecodChurchId = prevWeekSecondChurch.map(schedule => schedule.prodeacons.map(user => user)).map(user => user.id)
                 
             //     // Current Week
             //     const currWeek = thisMonthSchedules.filter(schedule => schedule.week === weekendSchedule[i].week)
