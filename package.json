@@ -1,6 +1,6 @@
 {
-    "name": "prodiakon-backend",
-    "version": "0.2.14-devel",
+    "name": "skripsi-be",
+    "version": "1.0.0",
     "description": "It is a responsive website portal to generate schedules, allowing the factors that affect each prodeacon's availability to be registered and managed within the system. It allows prodeacons to view their own schedules as well as those of others",
     "main": "build/index.js",
     "scripts": {

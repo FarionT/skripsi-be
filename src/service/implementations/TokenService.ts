@@ -31,7 +31,7 @@ export default class TokenService implements ITokenService {
     };
 
     verifyToken = async (token: string, type: string) => {
-        const payload: any = await jwt.verify(token, config.jwt.secret, (err, decoded) => {
+        const payload: any = await jwt.verify(token, config.jwt.secret, { ignoreExpiration: true }, (err, decoded) => {
             if (err) {
                 throw new Error('Token not found');
             } else {
