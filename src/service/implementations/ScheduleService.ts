@@ -1064,7 +1064,7 @@ export default class ScheduleService implements IScheduleService {
                 ],
                 order: [
                     ['date', 'ASC'],
-                    ['time', 'ASC']
+                    ['time', 'ASC'],
                 ]
             })
 
@@ -1125,7 +1125,7 @@ export default class ScheduleService implements IScheduleService {
                 }
             })
 
-            let schedules = currMonthSchedules.filter(schedule => schedule.church_id === Number(church_id))
+            let schedules = currMonthSchedules.filter(schedule => schedule.church_id === Number(church_id) && schedule.auto_generated !== null)
             let formatted_schedules = schedules.map(item => ({
                 ...item,
                 church_name: item.church.name,
@@ -1187,19 +1187,23 @@ export default class ScheduleService implements IScheduleService {
             summaryCell.value = 'Summary Schedules';
             summaryCell.alignment = { vertical: 'middle', horizontal: 'center' };
 
+            let userSummaryArray: any = []
+
             // To input user's registration number, user's name, and user's phone number
             for (let i = 0; i < user.length; i++) {
                 worksheet.getCell(`A${i + 4}`).value = String(user[i].user_registration_number).padStart(3, '0')
                 worksheet.getCell(`B${i + 4}`).value = user[i].nick_name
                 worksheet.getCell(`C${i + 4}`).value = user[i].phone_number
+                userSummaryArray.push([])
             }
             
             // Assigning date and time
             let start = 5
             let finish = start
-            let currentDay = formatted_schedules[0].date
+            let currentDay = formatted_schedules[0] ? formatted_schedules[0].date : {}
 
             let assignedUser: any = []
+
             for (let i = 0; i < formatted_schedules.length; i++) {
                 const currWeek = thisMonthAutoSchedules.filter(schedule => schedule.week === formatted_schedules[i].week)
                 const currWeekFirstChurch = currWeek.filter(schedule => Number(schedule.church.id) === Number(formatted_schedules[i].church_id))
@@ -1238,12 +1242,16 @@ export default class ScheduleService implements IScheduleService {
                 worksheet.getColumn(i + 5).width = 5
 
                 // Assigning prodeacon schedules
-                const prodeacons = formatted_schedules[i].prodeacons
+                const prodeacons = formatted_schedules[i].prodeacons.sort((a, b) => b.mass_coordinator - a.mass_coordinator)
                 let amanCount = 0
                 for (let j = 0; j < prodeacons.length; j++) {
                     let userIndex = user.findIndex(item => item.id === prodeacons[j].id)
                     let currUser = user.find(item => item.id === prodeacons[j].id)
                     let userCell = worksheet.getCell(`${getColumnCell(i + 5)}${userIndex + 4}`)
+                    let color = 'ff000000'
+                    let penalty = ''
+
+                    let cellFlag = false
                     
                     userCell.value = 'V'
                     userCell.alignment = { vertical: 'middle', horizontal: 'center' }
@@ -1252,20 +1260,24 @@ export default class ScheduleService implements IScheduleService {
                     }
 
                     if (!user[userIndex].preferential_schedules.includes(formatted_schedules[i].church_schedule_id)) {
-                        userCell.fill = {
-                            type: 'pattern',
-                            pattern: 'solid',
-                            fgColor: { argb: 'fffa9189' }, //merah
-                        };
+                        // userCell.fill = {
+                        //     type: 'pattern',
+                        //     pattern: 'solid',
+                        //     fgColor: { argb: 'fffa9189' }, //merah
+                        // };
+                        penalty += '(P) '
+                        cellFlag = true
                     }
 
                     if (prodeacons[j].mass_coordinator) {
                         if (user[userIndex].mass_coordination_flag === true && !(formatted_schedules[i].min_mass_coordination_type >= currUser.mass_coordination_type)) {
-                            userCell.fill = {
-                                type: 'pattern',
-                                pattern: 'solid',
-                                fgColor: { argb: 'FFFFE599' }, //kuning
-                            };
+                            // userCell.fill = {
+                            //     type: 'pattern',
+                            //     pattern: 'solid',
+                            //     fgColor: { argb: 'FFFFE599' }, //kuning
+                            // };
+                            penalty += '(K) '
+                            cellFlag = true
                         }
                     }
 
@@ -1277,22 +1289,28 @@ export default class ScheduleService implements IScheduleService {
                     if (formatted_schedules[i].auto_generated !== null) {
 
                         if (currWeekSecondChurchId.includes(user[userIndex].id)) {
-                            userCell.fill = {
-                                type: 'pattern',
-                                pattern: 'solid',
-                                fgColor: { argb: 'ffb6f0b1' }, //hijau
-                            };
+                            // userCell.fill = {
+                            //     type: 'pattern',
+                            //     pattern: 'solid',
+                            //     fgColor: { argb: 'ffb6f0b1' }, //hijau
+                            // };
                             flag = true
+                            penalty += '(C) '
+                            cellFlag = true
                         }
     
                         if (!flag) {
                             if (assignedUser.includes(user[userIndex].id)) {
-                                userCell.fill = {
-                                    type: 'pattern',
-                                    pattern: 'solid',
-                                    fgColor: { argb: 'ffb6f0b1' }, //hijau
-                                };
-                                flag = true
+                                // userCell.fill = {
+                                //     type: 'pattern',
+                                //     pattern: 'solid',
+                                //     fgColor: { argb: 'ffb6f0b1' }, //hijau
+                                // };
+                                // flag = prodeacons.some((prodeacon) => prodeacon.id === prodeacons[j].id && !prodeacon.mass_coordinator)
+                                // if (flag) {
+                                penalty += '(C) '
+                                cellFlag = true
+                                // }
                             }
                         }
                     }
@@ -1301,14 +1319,54 @@ export default class ScheduleService implements IScheduleService {
                     let currentDate = new Date(formatted_schedules[i].date).getDate()
                     let currentMonth = new Date(formatted_schedules[i].date).getMonth() + 1
                     let currentTime = formatted_schedules[i].time
-                    userSummaryCell.value = (userSummaryCell ? userSummaryCell : '') + '\n' + 
+
+                    let newValueInput = String(currentDate).padStart(2, '0') + '/' + String(currentMonth).padStart(2, '0') + ' -> ' + currentTime.slice(0, 5)
+                                            + (prodeacons[j].mass_coordinator ? ' (Koor)' : '') + ' ' + penalty + '\n'
+
+                    let newValue = (userSummaryCell ? userSummaryCell : '') + '\n' + 
                                             String(currentDate).padStart(2, '0') + '/' + String(currentMonth).padStart(2, '0') + ' -> ' + currentTime.slice(0, 5)
-                                            + (prodeacons[j].mass_coordinator ? ' (Koor)' : '')
+                                            + (prodeacons[j].mass_coordinator ? ' (Koor)' : '') + ' ' + penalty
+
+                    if (cellFlag) {
+                        userCell.fill = {
+                            type: 'pattern',
+                            pattern: 'solid',
+                            fgColor: { argb: 'fffa9189' }, //merah
+                        };
+                    }
+
+                    let text = {
+                        text: newValueInput,
+                        font: {
+                            color: {
+                                argb: cellFlag ? 'fffa9189' : color,
+                                theme: 1,
+                            },
+                            size: 9
+                        }
+                    }
+                    
+                    // if (userSummaryCell.value === null) {
+                    //     userSummaryCell.value = {
+                    //         richText: [ text ]
+                    //     }
+                    //     console.log('null ', userSummaryCell.value.richText)
+                    // } else if (userSummaryCell.value.richText !== undefined) {
+                    //     console.log('richText ', userSummaryCell.value.richText)
+                    //     userSummaryCell.value = userSummaryCell.value.richText.push(text)
+                    // }
+
+                    userSummaryArray[userIndex].push(text)
+                    
                     userSummaryCell.alignment = { wrapText: true }
                     worksheet.getCell(`${getColumnCell(start)}2`).alignment = { vertical: 'middle', horizontal: 'center' };
 
+                    
+
                     if (formatted_schedules[i].auto_generated !== null) {
-                        assignedUser.push(user[userIndex].id)
+                        if (!(prodeacons[j].mass_coordinator && prodeacons.filter(user => user.id === prodeacons[j].id).length > 1)) {
+                            assignedUser.push(user[userIndex].id)
+                        }
                     }
                 }
 
@@ -1319,6 +1377,13 @@ export default class ScheduleService implements IScheduleService {
                         fgColor: { argb: 'ffcde7f7' },
                     };
                 }
+            }
+
+            for (let i = 0; i < user.length; i++) {
+                let userSummaryCell = worksheet.getCell(`D${i + 4}`)
+                userSummaryCell.value = {
+                    richText: userSummaryArray[i] 
+                } 
             }
 
             worksheet.eachRow((row) => {
